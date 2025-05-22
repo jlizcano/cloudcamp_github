@@ -1,0 +1,68 @@
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - '*.tf'
+      - '*.tfvars'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - name: terraformVersion
+    value: '1.5.7'  # Specify your Terraform version
+  - name: environmentName
+    value: 'dev'    # Change as needed
+  - name: stateBucket
+    value: 'your-terraform-state-bucket'
+  - name: stateKey
+    value: 'terraform.tfstate'
+  - name: awsRegion
+    value: 'us-east-1'
+
+stages:
+- stage: Build
+  jobs:
+  - job: TerraformPlan
+    steps:
+    - task: TerraformInstaller@0
+      inputs:
+        terraformVersion: $(terraformVersion)
+      displayName: 'Install Terraform'
+
+    - task: AWSCLI@1
+      inputs:
+        awsCredentials: 'AWS-Service-Connection'  # Configure this in Azure DevOps
+        regionName: $(awsRegion)
+      displayName: 'Configure AWS Credentials'
+
+    - task: CopyFiles@2
+      inputs:
+        Contents: |
+          **/*.tf
+          **/*.tfvars
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+      displayName: 'Copy Terraform Files'
+
+    - script: |
+        terraform init \
+          -backend=true \
+          -backend-config="bucket=$(stateBucket)" \
+          -backend-config="key=$(stateKey)" \
+          -backend-config="region=$(awsRegion)"
+      workingDirectory: '$(Build.ArtifactStagingDirectory)'
+      displayName: 'Terraform Init'
+
+    - script: |
+        terraform plan -out=$(Build.ArtifactStagingDirectory)/tfplan
+      workingDirectory: '$(Build.ArtifactStagingDirectory)'
+      displayName: 'Terraform Plan'
+
+    - task: PublishPipelineArtifact@1
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: 'terraform-plan'
+        publishLocation: 'pipeline'
+      displayName: 'Publish Terraform Plan'

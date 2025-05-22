@@ -1,0 +1,61 @@
+trigger: none  # Manual trigger only
+
+parameters:
+- name: environmentName
+  type: string
+  default: 'dev'
+  values:
+  - 'dev'
+  - 'staging'
+  - 'prod'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - name: terraformVersion
+    value: '1.5.7'
+  - name: awsRegion
+    value: 'us-east-1'
+
+stages:
+- stage: Deploy
+  jobs:
+  - deployment: TerraformApply
+    environment: ${{ parameters.environmentName }}  # Configure environments in Azure DevOps
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: TerraformInstaller@0
+            inputs:
+              terraformVersion: $(terraformVersion)
+            displayName: 'Install Terraform'
+
+          - task: AWSCLI@1
+            inputs:
+              awsCredentials: 'AWS-Service-Connection'  # Configure this in Azure DevOps
+              regionName: $(awsRegion)
+            displayName: 'Configure AWS Credentials'
+
+          - download: current
+            artifact: 'terraform-plan'
+            displayName: 'Download Terraform Plan'
+
+          - script: |
+              terraform init
+            workingDirectory: '$(Pipeline.Workspace)/terraform-plan'
+            displayName: 'Terraform Init'
+
+          - task: ManualValidation@0
+            timeoutInMinutes: 60
+            inputs:
+              notifyUsers: |
+                user@your-domain.com
+              instructions: 'Please validate the terraform plan and approve the deployment'
+            displayName: 'Approval Gate'
+
+          - script: |
+              terraform apply -auto-approve "$(Pipeline.Workspace)/terraform-plan/tfplan"
+            workingDirectory: '$(Pipeline.Workspace)/terraform-plan'
+            displayName: 'Terraform Apply'
